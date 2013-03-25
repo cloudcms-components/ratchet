@@ -1,5 +1,5 @@
 /*
-Copyright 2011 Gitana Software, Inc.
+Copyright 2012 Gitana Software, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License"); 
 you may not use this file except in compliance with the License. 
@@ -33,19 +33,16 @@ address:
         // Node. Does not work with strict CommonJS, but
         // only CommonJS-like environments that support module.exports,
         // like Node.
-        //module.exports = factory(require('b'));
         module.exports = factory();
     }
     else if (typeof define === 'function' && define.amd)
     {
         // AMD. Register as an anonymous module.
-        //define(['b'], factory);
-        define('ratchet', ['jquery'], factory);
+        define( ['jquery'], factory);
     }
     else
     {
         // Browser globals
-        //root.returnExports = factory(root.b);
         root["Ratchet"] = factory();
     }
 
@@ -59,7 +56,7 @@ address:
     //return {};
 
     /*!
-Alpaca Version 1.0.2-SNAPSHOT
+Ratchet Version 1.0.2
 
 Copyright 2012 Gitana Software, Inc.
 
@@ -1099,6 +1096,11 @@ if (!this.JSON) {
     Ratchet = Base.extend(
     {
         /**
+         * The default URI that gets dispatched on an initial empty run() call.
+         */
+        DEFAULT_URI: "/",
+
+        /**
          * Instantiates a ratchet.
          *
          * The ratchet will render into the given dom element.  If no dom element is provided, the document body
@@ -1163,9 +1165,10 @@ if (!this.JSON) {
             // ratchet id
             this.id = Ratchet.generateId();
 
-            // gadget instance and type
+            // gadget bindings: instance, type and strategy
             this.gadgetInstances = [];
             this.gadgetType = null;
+            this.gadgetStrategy = null;
 
             // subscriptions
             this.subscriptions = {};
@@ -1218,11 +1221,17 @@ if (!this.JSON) {
             {
                 var tokens = {};
 
+                var printDebug = function()
+                {
+                    //console.log("Matched - pattern: " + matcher + ", text: " + text + ", tokens: " + JSON.stringify(tokens));
+                };
+
                 // short cut - **
                 if (matcher == "**")
                 {
                     // it's a match, pull out wildcard token
                     tokens["**"] = text;
+                    printDebug();
                     return tokens;
                 }
 
@@ -1233,6 +1242,7 @@ if (!this.JSON) {
                     if (matcher == text)
                     {
                         // it's a match, no tokens
+                        printDebug();
                         return tokens;
                     }
                 }
@@ -1243,6 +1253,7 @@ if (!this.JSON) {
                 // short cut - zero length matches
                 if ((array1.length == 0) && (array2.length == 0))
                 {
+                    printDebug();
                     return tokens;
                 }
 
@@ -1251,8 +1262,11 @@ if (!this.JSON) {
                     var pattern = array1.shift();
                     var value = array2.shift();
 
+                    var patternEmpty = (Ratchet.isEmpty(pattern) || pattern === "");
+                    var valueEmpty = (Ratchet.isEmpty(value) || value === "");
+
                     // if there are remaining pattern and value elements
-                    if (!Ratchet.isEmpty(pattern) && !Ratchet.isEmpty(value))
+                    if (!patternEmpty && !valueEmpty)
                     {
                         if (pattern == "*")
                         {
@@ -1262,7 +1276,6 @@ if (!this.JSON) {
                         {
                             // wildcard - match everything else, so break out
                             tokens["**"] = "/" + [].concat(value, array2).join("/");
-                            //tokens["**"] = "/" + Array.concat(value, array2).join("/");
                             break;
                         }
                         else if (Ratchet.startsWith(pattern, "{"))
@@ -1287,7 +1300,9 @@ if (!this.JSON) {
                     }
                     else
                     {
-                        if ((pattern && Ratchet.isEmpty(value)) || (Ratchet.isEmpty(pattern) && value))
+                        // if we expected a pattern but empty value or we have a value but no pattern
+                        // then it is a mismatch
+                        if ((pattern && valueEmpty) || (patternEmpty && value))
                         {
                             return null;
                         }
@@ -1295,6 +1310,7 @@ if (!this.JSON) {
                 }
                 while (!Ratchet.isEmpty(pattern) && !Ratchet.isEmpty(value));
 
+                printDebug();
                 return tokens;
             };
 
@@ -1426,7 +1442,6 @@ if (!this.JSON) {
                 this.setupFunction.call(this);
             }
 
-
             // if the current element being set up is a "<region>" tag, then we instantly convert it to a proper DOM tag
             if ($(this.el)[0].nodeName.toLowerCase() == "region")
             {
@@ -1445,12 +1460,19 @@ if (!this.JSON) {
             {
                 this.gadgetType = $(this.el).attr("gadget");
                 this.gadgetId = $(this.el).attr("id");
+                this.gadgetStrategy = null;
             }
 
             // if there is a gadget configured for this dom element, boot it up
             if (this.gadgetType)
             {
-                this.gadgetInstances = Ratchet.GadgetRegistry.instantiate(this.gadgetType, this.gadgetId, this);
+                // if we don't have a gadget id, we generate one
+                if (!this.gadgetId) {
+                    this.gadgetId = Ratchet.generateGadgetId();
+                }
+
+                this.gadgetInstances = Ratchet.GadgetRegistry.instantiate(this.gadgetType, this, this.gadgetId);
+                Ratchet.logDebug("Ratchet.setup() - Instantiated " + this.gadgetInstances.length + " gadget instances for type: " + this.gadgetType + " and id: " + this.gadgetId);
                 $.each(this.gadgetInstances, function(x, y) {
                     y.setup.call(y);
                 });
@@ -1485,9 +1507,11 @@ if (!this.JSON) {
             });
 
             // tear down any gadget instances
+            var l1 = this.gadgetInstances.length;
             $.each(this.gadgetInstances, function(i, gadgetInstance) {
                 gadgetInstance.teardown();
             });
+            Ratchet.logDebug("Ratchet.teardown() - Removed " + l1 + " gadget instances");
             this.gadgetInstances = [];
 
             // releases any routes
@@ -1527,6 +1551,7 @@ if (!this.JSON) {
             //
             $(context.closestDescendants('region')).each(function() {
                 Ratchet.convertRegionTag(this);
+                Ratchet.logDebug("Converted region tag: " + $(this).outerHTML());
             });
 
 
@@ -1539,15 +1564,21 @@ if (!this.JSON) {
             //
             //  <div region="<regionId>"></div>
             //
+            var _rarray = [];
             var regions = {};
             $(context.closestDescendants("[region]")).each(function()
             {
                 var regionId = $(this).attr("region");
                 regions[regionId] = this;
+                _rarray.push(regionId);
+
+                Ratchet.logDebug("Found region: " + regionId);
             });
 
             // resolve all of these regions
             resolver.resolve.call(resolver, this, regions, function(resolutions) {
+
+                Ratchet.logDebug("Resolved regions: " + JSON.stringify(_rarray) + " to: " + JSON.stringify(resolutions));
 
                 for (var regionId in resolutions)
                 {
@@ -1560,15 +1591,42 @@ if (!this.JSON) {
                         var gadgetId = resolution["id"];
                         var attrs = resolution["attrs"];
 
+                        // store a copy of the original dom attributes
+                        var originalAttributes = {};
+                        $(context.closestDescendants("[region=" + regionId + "]")[0]).each(function() {
+                            $.each($(this)[0].attributes, function(index, attr) {
+                                var name = attr.nodeName;
+                                var value = attr.nodeValue;
+
+                                originalAttributes[name] = value;
+                            });
+                        });
+
+                        // build new tag
                         var tag = $("<div gadget='" + gadgetType + "'></div>");
+
+                        // copy original dom attributes in, skipping any that we wouldn't want to keep
+                        $.each(originalAttributes, function(k, v) {
+
+                            // TODO: is there anything here we want to skip?
+                            tag.attr(k, v);
+                        });
+
+                        // copy attributes dictated by the resolver
                         $.each(attrs, function(k, v) {
                             tag.attr(k, v);
                         });
+
+                        // set gadget id
                         if (gadgetId)
                         {
                             tag.attr("id", gadgetId);
                         }
 
+                        // set strategy
+                        tag.attr("gadget-strategy", "replace");
+
+                        // substitute in
                         $(context.closestDescendants("[region=" + regionId + "]")[0]).replaceWith(tag);
                     }
                 }
@@ -1594,10 +1652,11 @@ if (!this.JSON) {
             //
             // these are:
             //
-            //  <gadget type="<gadgetType>"></gadget>
+            //  <gadget type="<gadgetType>" [strategy="<strategy>"]></gadget>
             //
             $(context.closestDescendants('gadget')).each(function() {
                 Ratchet.convertGadgetTag(this);
+                Ratchet.logDebug("Converted region tag: " + $(this).outerHTML());
             });
 
 
@@ -1614,8 +1673,9 @@ if (!this.JSON) {
             {
                 var subGadgetType = $(this).attr("gadget");
                 var subGadgetId = $(this).attr("id");
+                var subGadgetStrategy = $(this).attr("gadget-strategy");
 
-                //$(this).removeAttr("gadget");
+                Ratchet.logDebug("Processing sub-gadget [type=" + subGadgetType + ", id=" + subGadgetId + "]");
 
                 // check if we already have a child ratchet for this gadget
                 var ratcheted = false;
@@ -1637,10 +1697,13 @@ if (!this.JSON) {
 
                 if (!ratcheted)
                 {
+                    Ratchet.logDebug("Ratcheting sub-gadget [type=" + subGadgetType + ", id=" + subGadgetId + "]");
+
                     // instantiate a child ratchet on top of this element
                     childRatchet = new Ratchet($(this), _this, function() {
                         this.gadgetType = subGadgetType;
                         this.gadgetId = subGadgetId;
+                        this.gadgetStrategy = subGadgetStrategy;
                     });
 
                     _this.childRatchets[childRatchet.id] = childRatchet;
@@ -1663,7 +1726,8 @@ if (!this.JSON) {
 
             // dispatch the child ratchets
             $.each(_this.childRatchets, function(childRatchetId, childRatchet) {
-                //Ratchet.debug("Dispatching child ratchet: " + subGadgetId + " (" + context.route.method + " " + context.route.uri + ")");
+
+                Ratchet.logDebug("Dispatching child ratchet [id=" + childRatchetId + "] (" + context.route.method + " " + context.route.uri + ")");
 
                 var subParams = params[childRatchetId];
 
@@ -1893,6 +1957,8 @@ if (!this.JSON) {
          */
         run: function()
         {
+            var self = this;
+
             var config = {
                 "method": "GET",
                 "data": {}
@@ -1908,7 +1974,7 @@ if (!this.JSON) {
                 }
                 else
                 {
-                    uri = "/";
+                    uri = self.DEFAULT_URI;
                 }
                 config.uri = uri;
             }
@@ -1954,105 +2020,90 @@ if (!this.JSON) {
 
         /////////////////////////////////////////////////////////////////////////////////////////////////
         //
-        // OBSERVABLES HELPER FUNCTIONS
+        // OBSERVABLES
+        //
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+
+        subscribe: function()
+        {
+            return Ratchet.subscribe.apply(this, arguments);
+        },
+
+        unsubscribe: function()
+        {
+            return Ratchet.unsubscribe.apply(this, arguments);
+        },
+
+        observable: function()
+        {
+            return Ratchet.observable.apply(this, arguments)
+        },
+
+        clearObservable: function()
+        {
+            return Ratchet.clearObservable.apply(this, arguments);
+        },
+
+        dependentObservable: function()
+        {
+            return Ratchet.dependentObservable.apply(this, arguments);
+        },
+
+
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // EVENTS
         //
         /////////////////////////////////////////////////////////////////////////////////////////////////
 
         /**
-         * Declares and gets an observable in a given scope.
-         * Optionally registers a callback function.
+         * Binds a single event handler.
          *
-         * @param [String] scope optional scope
-         * @param {String} id the variable id
-         * @param [String] callbackKey callback key
-         * @param [Function] callbackFunction a callback function to fire when the value of this observable changes
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param {Function} eventHandler
          */
-        observable: function()
+        on: function()
         {
-            var scope;
-            var id;
-            var callbackKey;
-            var callbackFunction;
-
-            var args = Ratchet.makeArray(arguments);
-            if (args.length == 1)
-            {
-                scope = "global";
-                id = args.shift();
-            }
-            else if (args.length == 2)
-            {
-                scope = args.shift();
-                id = args.shift();
-            }
-            else if (args.length == 3)
-            {
-                scope = "global";
-                id = args.shift();
-                callbackKey = args.shift();
-                callbackFunction = args.shift();
-            }
-            else if (args.length == 4)
-            {
-                scope = args.shift();
-                id = args.shift();
-                callbackKey = args.shift();
-                callbackFunction = args.shift();
-            }
-
-            var observables = Ratchet.ScopedObservables.get(scope);
-            var observable = observables.observable(id);
-
-            // binding a function handler
-            if (callbackKey && callbackFunction)
-            {
-                // subscribe
-                observable.subscribe(callbackKey, callbackFunction);
-
-                // remember we subscribed
-                this.subscriptions[callbackKey] = observable;
-            }
-
-            return observable;
+            return Ratchet.Events.on.apply(this, arguments);
         },
 
         /**
-         * Declares and gets a dependent observable in a given scope
+         * Binds a single event to be triggered only once.  After triggering, the handler is removed.
          *
-         * @param scope
-         * @param id
-         * @param func
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param {Function} eventHandler
          */
-        dependentObservable: function()
+        once: function()
         {
-            var scope = null;
-            var id = null;
-            var func = null;
-
-            var args = Ratchet.makeArray(arguments);
-            if (args.length == 2)
-            {
-                scope = "global";
-                id = args.shift();
-                func = args.shift();
-            }
-            else if (args.length == 3)
-            {
-                scope = args.shift();
-                id = args.shift();
-                func = args.shift();
-            }
-            else
-            {
-                Ratchet.error("Wrong number of arguments");
-                return;
-            }
-
-            var observables = Ratchet.ScopedObservables.get(scope);
-
-            return observables.dependentObservable(id, func);
+            return Ratchet.Events.once.apply(this, arguments);
         },
 
+        /**
+         * Removes an event handler.
+         *
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param {Function} eventHandler
+         */
+        off: function()
+        {
+            return Ratchet.Events.off.apply(this, arguments);
+        },
+
+        /**
+         * Triggers an event.
+         *
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param [Object] eventParameters
+         */
+        trigger: function()
+        {
+            return Ratchet.Events.trigger.apply(this, arguments);
+        },
 
 
         /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2235,12 +2286,16 @@ if (!this.JSON) {
         var type = $(domEl).attr("type");
 
         // build the replacement tag
-        var tag = $("<" + tag +" gadget='" + type + "' tempkey='xyz'></" + tag + ">");
+        var tag = $("<" + tag +" gadget='" + type + "'></" + tag + ">");
 
         // copy attributes
         $.each($(domEl)[0].attributes, function(index, attr) {
             var name = attr.nodeName;
             var value = attr.nodeValue;
+
+            if (name == "strategy") {
+                name = "gadget-strategy";
+            }
 
             if (name == "tag" || name == "type")
             {
@@ -2252,6 +2307,10 @@ if (!this.JSON) {
             }
         });
 
+        // assign temp key
+        var tempKey = "temp-" + new Date().getTime();
+        $(tag).attr("tempkey", tempKey);
+
         // copy inner html
         $(tag).html($(domEl).html());
 
@@ -2259,7 +2318,7 @@ if (!this.JSON) {
 
         $(domEl).replaceWith(tag);
 
-        tag = $(parent).children('[tempkey=xyz]')[0];
+        tag = $(parent).children("[tempkey=" + tempKey + "]")[0];
         $(tag).removeAttr("tempkey");
 
         return tag;
@@ -2280,7 +2339,11 @@ if (!this.JSON) {
         var regionId = $(domEl).attr("id");
 
         // build the replacement tag
-        var tag = $("<" + tag +" region='" + regionId + "' tempkey='xyz'></" + tag + ">");
+        var tag = $("<" + tag +" region='" + regionId + "'></" + tag + ">");
+
+        // assign temp key
+        var tempKey = "temp-" + new Date().getTime();
+        $(tag).attr("tempkey", tempKey);
 
         $.each($(domEl)[0].attributes, function(index, attr) {
             var name = attr.nodeName;
@@ -2300,7 +2363,7 @@ if (!this.JSON) {
 
         $(domEl).replaceWith(tag);
 
-        tag = $(parent).children('[tempkey=xyz]')[0];
+        tag = $(parent).children("[tempkey=" + tempKey +"]")[0];
         $(tag).removeAttr("tempkey");
 
         return tag;
@@ -2331,10 +2394,60 @@ if (!this.JSON) {
     }
 
 
-})(jQuery);(function()
-{
-    Ratchet.uniqueIdCounter = 0;
 
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // LOGGER
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////////
+
+    // by default, logging only shows errors
+    // to debug, set Ratchet.logLevel = Ratchet.DEBUG
+    Ratchet.logLevel = 3;
+
+    Ratchet.DEBUG = 0;
+    Ratchet.INFO = 1;
+    Ratchet.WARN = 2;
+    Ratchet.ERROR = 3;
+
+    Ratchet.logDebug = function(obj) {
+        Ratchet.log(Ratchet.DEBUG, obj);
+    };
+    Ratchet.logInfo = function(obj) {
+        Ratchet.log(Ratchet.INFO, obj);
+    };
+    Ratchet.logWarn = function(obj) {
+        Ratchet.log(Ratchet.WARN, obj);
+    };
+    Ratchet.logError = function(obj, includeStack) {
+        Ratchet.log(Ratchet.ERROR, obj);
+        if (includeStack)
+        {
+            console.log(Ratchet.ERROR, new Error().stack);
+        }
+    };
+
+    Ratchet.log = function(level, obj) {
+
+        var methodMap = {
+            0: 'debug',
+            1: 'info',
+            2: 'warn',
+            3: 'error'
+        };
+
+        if (Ratchet.logLevel <= level)
+        {
+            var method = methodMap[level];
+            if (typeof console !== 'undefined' && console[method])
+            {
+                console[method].call(console, obj);
+            }
+        }
+    };
+
+})(jQuery);(function($)
+{
     /**
      * Builds an array from javascript method arguments.
      *
@@ -2430,26 +2543,88 @@ if (!this.JSON) {
         }
     };
 
-    Ratchet.isArray = function(obj)
+    Ratchet.isArray = function(thing)
     {
-        return obj.push && obj.slice;
+        if (thing === true || thing === false || Ratchet.isUndefined(thing) || thing == null) {
+            return false;
+        }
+
+        return thing.push && thing.slice;
     };
 
-    Ratchet.isUndefined = function(obj)
+    Ratchet.isUndefined = function(thing)
     {
-        return (typeof obj == "undefined");
+        return (typeof thing == "undefined");
     };
 
-    Ratchet.isEmpty = function(obj)
+    Ratchet.isEmpty = function(thing)
     {
-        return this.isUndefined(obj) || obj == null;
+        return this.isUndefined(thing) || thing == null;
+    };
+
+    Ratchet.isEmptyObject = function(thing)
+    {
+        var empty = true;
+
+        for (var k in thing)
+        {
+            empty = false;
+            break;
+        }
+
+        return empty;
+    };
+
+    Ratchet.isObject = function(thing)
+    {
+        if (thing === true || thing === false || Ratchet.isUndefined(thing) || thing == null) {
+            return false;
+        }
+
+        return (typeof(thing) === "object") && (typeof(thing.length) === "undefined");
+    };
+
+    Ratchet.copyOf = function(thing)
+    {
+        var copy = thing;
+
+        if (Ratchet.isArray(thing) || Ratchet.isObject(thing))
+        {
+            copy = JSON.parse(JSON.stringify(thing));
+        }
+
+        return copy;
     };
 
     Ratchet.generateId = function()
     {
-        Ratchet.uniqueIdCounter++;
-        return "ratchet-" + Ratchet.uniqueIdCounter;
+        return "ratchet-" + Ratchet.uniqueCount();
     };
+
+    Ratchet.generateGadgetId = function()
+    {
+        return "gadget-" + Ratchet.uniqueCount();
+    };
+
+    Ratchet.generateListenerId = function()
+    {
+        return "l-" + Ratchet.uniqueCount();
+    };
+
+    Ratchet.generateEventHandlerId = function()
+    {
+        return "ev-" + Ratchet.uniqueCount();
+    };
+
+    Ratchet.uniqueCount = function()
+    {
+        var x = 0;
+
+        return function()
+        {
+            return x++;
+        };
+    }();
 
     Ratchet.isNode = function(o)
     {
@@ -2533,8 +2708,736 @@ if (!this.JSON) {
         return null;
     };
 
+    Ratchet.urlEncode = function(text)
+    {
+        return encodeURIComponent(text);
+    };
 
-})(window);(function($)
+    Ratchet.urlDecode = function(text)
+    {
+        return decodeURIComponent(text);
+    };
+
+    /*
+    Ratchet.removeFromArray = function(array, value, all)
+    {
+        for (var i = 0; i < array.length; i++)
+        {
+            if (array[i] == value) {
+                array.splice(i, 1);
+                i--;
+
+                if (!all) {
+                    break;
+                }
+            }
+        }
+
+        return array;
+    };
+    */
+
+    Ratchet.substituteTokens = function(original, tokens)
+    {
+        var text = original;
+
+        for (var tokenId in tokens)
+        {
+            var tokenValue = tokens[tokenId];
+            text = text.replace("{" + tokenId + "}", tokenValue);
+        }
+
+        return text;
+    };
+
+    Ratchet.merge = function(source, target)
+    {
+        var isArray = Ratchet.isArray;
+        var isObject = Ratchet.isObject;
+        var isUndefined = Ratchet.isUndefined;
+        var copyOf = Ratchet.copyOf;
+
+        var merge = function(source, target)
+        {
+            if (Ratchet.isUndefined(source))
+            {
+                // do nothing
+            }
+            else if (isArray(source))
+            {
+                if (isArray(target))
+                {
+                    // merge array elements
+                    $.each(source, function(index) {
+                        target.push(copyOf(source[index]));
+                    });
+                }
+                else
+                {
+                    // something is already in the target that isn't an ARRAY
+                    // skip
+                }
+            }
+            else if (isObject(source))
+            {
+                if (isObject(target))
+                {
+                    // merge object properties
+                    $.each(source, function(key) {
+
+                        if (isUndefined(target[key])) {
+                            target[key] = copyOf(source[key]);
+                        } else {
+                            target[key] = merge(source[key], target[key]);
+                        }
+
+                    });
+                }
+                else
+                {
+                    // something is already in the target that isn't an OBJECT
+                    // skip
+                }
+
+            }
+            else
+            {
+                // otherwise, it's a scalar, always overwrite
+                target = copyOf(source);
+            }
+
+            return target;
+        };
+
+        merge(source, target)
+    };
+
+    /**
+     * Finds if an string ends with a given suffix.
+     *
+     * @param {String} text The string being evaluated.
+     * @param {String} suffix Suffix.
+     * @returns {Boolean} True if the string ends with the given suffix, false otherwise.
+     */
+    Ratchet.endsWith = function(text, suffix) {
+        return text.indexOf(suffix, text.length - suffix.length) !== -1;
+    };
+
+    /**
+     * Combines one or more path elements into a combined path.
+     *
+     * @return {String}
+     */
+    Ratchet.paths = function()
+    {
+        var result = "";
+
+        for (var i = 0; i < arguments.length; i++)
+        {
+            result += "/" + arguments[i];
+        }
+
+        result = result.replace("//", "/");
+        result = result.replace("//", "/");
+
+        return result;
+    };
+
+    /**
+     * Parses an ISO8601 encoded date string to a JS date object.
+     *
+     * @param text
+     * @returns javascript date (or null if cannot parse)
+     */
+    Ratchet.parseISO8601 = function(text)
+    {
+        var regex = /^(?:(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?)?(?:T(\d{2}):(\d{2})(?::(\d{2})(.\d+)?)?((?:[+-](\d{2}):(\d{2}))|Z)?)?$/;
+
+        var match = regex.exec(text);
+        var result = null;
+
+        if (match)
+        {
+            match.shift();
+            if (match[1])
+            {
+                // decrement since JS date months are 0-based
+                match[1]--;
+            }
+            if (match[6])
+            {
+                // JS date expects fractional seconds as milliseconds
+                match[6] *= 1000;
+            }
+
+            result = new Date(match[0]||1970, match[1]||0, match[2]||1, match[3]||0, match[4]||0, match[5]||0, match[6]||0);
+
+            var offset = 0;
+            var zoneSign = match[7] && match[7].charAt(0);
+            if (zoneSign != 'Z')
+            {
+                offset = ((match[8] || 0) * 60) + (Number(match[9]) || 0);
+                if (zoneSign != '-')
+                {
+                    offset *= -1;
+                }
+            }
+            if (zoneSign)
+            {
+                offset -= result.getTimezoneOffset();
+            }
+            if (offset)
+            {
+                result.setTime(result.getTime() + offset * 60000);
+            }
+        }
+
+        return result;
+    };
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // OBSERVABLES HELPER FUNCTIONS
+    //
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * Subscribes a function handler to an observable.
+     *
+     * @param [String] scope optional scope
+     * @param {String} id the variable id
+     * @param {Function} callbackFunction the callback function
+     *
+     * @return descriptor
+     */
+    Ratchet.subscribe = function()
+    {
+        var args = Ratchet.makeArray(arguments);
+
+        var scope = null;
+        var id = null;
+        var listener = null;
+
+        if (args.length == 2)
+        {
+            scope = "global";
+            id = args.shift();
+            listener = args.shift();
+        }
+        else
+        {
+            scope = args.shift();
+            id = args.shift();
+            listener = args.shift();
+        }
+
+        if (!id)
+        {
+            Ratchet.logError("Missing observable subscribe id: " + id);
+            return null;
+        }
+
+        // function identifier
+        var listenerId = listener._lfid;
+        if (!listenerId) {
+            listenerId = Ratchet.generateListenerId();
+            listener._lfid = listenerId;
+        }
+
+        // wrap function into a closure
+        var func = function(that) {
+            return function() {
+                return listener.apply(that, arguments);
+            };
+        }(this);
+        func._lfid = listener._lfid;
+
+        var observables = Ratchet.ScopedObservables.get(scope);
+        var observable = observables.observable(id);
+
+        // tell the observable to subscribe
+        observable.subscribe(listenerId, func);
+
+        return {
+            "scope": scope,
+            "id": id,
+            "listenerId": listenerId
+        };
+    };
+
+    /**
+     * Unsubscribes a function handler from an observable.
+     *
+     * @param [String] scope optional scope
+     * @param {String} id the variable id
+     * @param {String|Function} listener either the function or listener id
+     * @return descriptor
+     */
+    Ratchet.unsubscribe = function()
+    {
+        var args = Ratchet.makeArray(arguments);
+
+        var scope = null;
+        var id = null;
+        var listenerOrId = null;
+
+        if (args.length == 2)
+        {
+            scope = "global";
+            id = args.shift();
+            listenerOrId = args.shift();
+        }
+        else if (args.length == 3)
+        {
+            scope = args.shift();
+            id = args.shift();
+            listenerOrId = args.shift();
+        }
+
+        var listenerId = listenerOrId;
+        if (Ratchet.isFunction(listenerId))
+        {
+            listenerId = listenerId._lfid;
+        }
+
+        var observables = Ratchet.ScopedObservables.get(scope);
+        var observable = observables.observable(id);
+
+        // tell the observable to unsubscribe
+        observable.unsubscribe(listenerId);
+
+        return {
+            "scope": scope,
+            "id": id,
+            "listenerId": listenerId
+        };
+    };
+
+    /**
+     * Gets or sets an observable in the given scope.
+     *
+     * @param [String] scope optional scope
+     * @param {String} id the variable id
+     */
+    Ratchet.observable = function()
+    {
+        var scope;
+        var id;
+
+        var args = Ratchet.makeArray(arguments);
+        if (args.length == 1)
+        {
+            scope = "global";
+            id = args.shift();
+        }
+        else if (args.length == 2)
+        {
+            scope = args.shift();
+            id = args.shift();
+        }
+
+        var observable = null;
+        if (!id)
+        {
+            Ratchet.logError("Missing observable id: " + JSON.stringify(args));
+        }
+        else
+        {
+            var observables = Ratchet.ScopedObservables.get(scope);
+            observable = observables.observable(id);
+        }
+
+        return observable;
+    };
+
+    Ratchet.clearObservable = function()
+    {
+        var scope;
+        var id;
+
+        var args = Ratchet.makeArray(arguments);
+        if (args.length == 1)
+        {
+            scope = "global";
+            id = args.shift();
+        }
+        else if (args.length == 2)
+        {
+            scope = args.shift();
+            id = args.shift();
+        }
+
+        var observables = Ratchet.ScopedObservables.get(scope);
+        var observable = observables.observable(id);
+
+        observable.clear();
+    };
+
+    /**
+     * Declares and gets a dependent observable in a given scope
+     *
+     * @param scope
+     * @param id
+     * @param func
+     */
+    Ratchet.dependentObservable = function()
+    {
+        var scope = null;
+        var id = null;
+        var func = null;
+
+        var args = Ratchet.makeArray(arguments);
+        if (args.length == 2)
+        {
+            scope = "global";
+            id = args.shift();
+            func = args.shift();
+        }
+        else if (args.length == 3)
+        {
+            scope = args.shift();
+            id = args.shift();
+            func = args.shift();
+        }
+        else
+        {
+            Ratchet.error("Wrong number of arguments");
+            return;
+        }
+
+        var observables = Ratchet.ScopedObservables.get(scope);
+
+        return observables.dependentObservable(id, func);
+    };
+
+    Ratchet.firstValueInObject = function(object)
+    {
+        var value = null;
+
+        var firstKey = Ratchet.firstKeyInObject(object);
+        if (firstKey) {
+            value = object[firstKey];
+        }
+
+        return value;
+    };
+
+    Ratchet.firstKeyInObject = function(object)
+    {
+        if (object) {
+            for (var k in object) {
+                if (object.propertyIsEnumerable(k)) {
+                    return k;
+                }
+            }
+        }
+        return null;
+    };
+
+    Ratchet.clearArray = function(array)
+    {
+        return array.splice(0, array.length);
+    };
+
+    Ratchet.clearObject = function(object)
+    {
+        var keys = [];
+        for (var key in object) {
+            keys.push(key);
+        }
+        for (var i = 0; i < keys.length; i++)
+        {
+            delete object[keys[i]];
+        }
+    };
+
+    Ratchet.clear = function(thing)
+    {
+        if (Ratchet.isObject(thing)) {
+            Ratchet.clearObject(thing);
+
+        } else if (Ratchet.isArray(thing)) {
+            Ratchet.clearArray(thing);
+        }
+    };
+
+    /**
+     * Converts a one or more arguments into a linearized format.
+     *
+     * For example:
+     *
+     *   Ratchet.toLinearForm("a", {
+     *       "b": {
+     *            "c": "x1",
+     *            "d": [1,2]
+     *       }
+     *   };
+     *
+     * Returns:
+     *
+     *   a&b.c=x1&b.d.0=1&b.d.1=2
+     *
+     * @return {String}
+     */
+    Ratchet.toLinearForm = function()
+    {
+        var result = "";
+
+        var textualize = function(prefix, mapOrArray)
+        {
+            var str = null;
+
+            if (mapOrArray)
+            {
+                str = "";
+
+                // convert scalar map elements to a linear form
+                var array = [];
+                for (var k in mapOrArray)
+                {
+                    var value = mapOrArray[k];
+
+                    var key = k;
+                    if (prefix) {
+                        key = prefix + "." + key;
+                    }
+
+                    if (Ratchet.isObject(value) || Ratchet.isArray(value))
+                    {
+                        array.push(textualize(key, value));
+                    }
+                    else
+                    {
+                        array.push("" + key + "=" + value);
+                    }
+                }
+
+                // now sort the array
+                array.sort();
+
+                // combine into a string
+                for (var j = 0; j < array.length; j++)
+                {
+                    str += array[j];
+                    if (j + 1 < array.length) {
+                        str += "&";
+                    }
+                }
+            }
+
+            return str;
+        };
+
+        for (var i = 0; i < arguments.length; i++)
+        {
+            var value = arguments[i];
+            if (value)
+            {
+                if (Ratchet.isObject(value) || Ratchet.isArray(value))
+                {
+                    value = textualize(null, value);
+                }
+
+                result += value;
+
+                if (i + 1 < arguments.length) {
+                    result += "&";
+                }
+            }
+        }
+
+        return result;
+    };
+
+    Ratchet.firstObjectKey = function(map)
+    {
+        var key = null;
+
+        if (map)
+        {
+            for (var k in map)
+            {
+                if (map.propertyIsEnumerable(k))
+                {
+                    key = k;
+                    break;
+                }
+            }
+        }
+
+        return key;
+    };
+
+    /**
+     * Converts a wildcard pattern to a regular expression pattern.
+     * Incorporated from jPad (http://jpaq.org/) MIT license.
+     *
+     * @param pat
+     * @param opts
+     * @return {RegExp}
+     */
+    Ratchet.wildcardToRegExp = function(pat, opts) {
+        if (!opts) {
+            opts = "lg";
+        }
+
+        var oOpt = opts && opts.indexOf("o") > -1;
+        var i, m, p = "", sAdd = (opts && opts.indexOf("l") > -1 ? "" : "?");
+        var re = new RegExp("~.|\\[!|" + (oOpt ? "{\\d+,?\\d*\\}|[" : "[")
+            + (opts && opts.indexOf("p") > -1 ? "" : "\\(\\)")
+            + "\\{\\}\\\\\\.\\*\\+\\?\\:\\|\\^\\$%_#<>]");
+        while((i = pat.search(re)) > -1 && i < pat.length) {
+            p += pat.substring(0, i);
+            if((m = pat.match(re)[0]) == "[!")
+                p += "[^";
+            else if(m.charAt(0) == "~")
+                p += "\\" + m.charAt(1);
+            else if(m == "*" || m == "%")
+                p += ".*" + sAdd;
+            else if(m == "?" || m == "_")
+                p += ".";
+            else if(m == "#")
+                p += "\\d";
+            else if(oOpt && m.charAt(0) == "{")
+                p += m + sAdd;
+            else if(m == "<")
+                p += "\\b(?=\\w)";
+            else if(m == ">")
+                p += "(?:\\b$|(?=\\W)\\b)";
+            else
+                p += "\\" + m;
+            pat = pat.substring(i + m.length);
+        }
+        p += pat;
+        if(opts) {
+            if(/[ab]/.test(opts))
+                p = "^" + p;
+            if(/[ae]/.test(opts))
+                p += "$";
+        }
+        return new RegExp(p, opts ? opts.replace(/[^gim]/g, "") : "");
+    };
+
+    Ratchet.padLeft = function(nr, n, str)
+    {
+        return Array(n-String(nr).length+1).join(str||'0')+nr;
+    };
+
+    Ratchet.each = function(objectOrArray, f)
+    {
+        for (var k in objectOrArray) {
+            f(k, objectOrArray[k]);
+        }
+    };
+
+    /**
+     * Strips any excess whitespace characters from the given text.
+     * Returns the trimmed string.
+     *
+     * @param str
+     *
+     * @return trimmed string
+     */
+    Ratchet.trim = function(text)
+    {
+        var trimmed = text;
+
+        if (trimmed && Ratchet.isString(trimmed))
+        {
+            trimmed = trimmed.replace(/^\s+|\s+$/g, '');
+        }
+
+        return trimmed;
+    };
+
+
+
+
+    // browser detection
+    Ratchet.Browser = function($) {
+
+        var jQversion = jQuery.fn.jquery.split(".");
+        if(jQversion[1]<8)
+            return;
+
+        var browser = {};
+        //browser.mozilla = false;
+        //browser.webkit = false;
+        browser.safari = false;
+        browser.chrome = false;
+        browser.opera = false;
+        browser.ie = false;
+        browser.firefox = false;
+
+        var nAgt = navigator.userAgent;
+        browser.name  = navigator.appName;
+        browser.fullVersion  = ''+parseFloat(navigator.appVersion);
+        browser.majorVersion = parseInt(navigator.appVersion,10);
+        var nameOffset,verOffset,ix;
+
+        // In Opera, the true version is after "Opera" or after "Version"
+        if ((verOffset=nAgt.indexOf("Opera"))!=-1) {
+            browser.opera = true;
+            browser.name = "Opera";
+            browser.fullVersion = nAgt.substring(verOffset+6);
+            if ((verOffset=nAgt.indexOf("Version"))!=-1)
+                browser.fullVersion = nAgt.substring(verOffset+8);
+        }
+        // In MSIE, the true version is after "MSIE" in userAgent
+        else if ((verOffset=nAgt.indexOf("MSIE"))!=-1) {
+            browser.ie = true;
+            browser.name = "Microsoft Internet Explorer";
+            browser.fullVersion = nAgt.substring(verOffset+5);
+        }
+        // In Chrome, the true version is after "Chrome"
+        else if ((verOffset=nAgt.indexOf("Chrome"))!=-1) {
+            //browser.webkit = true;
+            browser.chrome = true;
+            browser.name = "Chrome";
+            browser.fullVersion = nAgt.substring(verOffset+7);
+        }
+        // In Safari, the true version is after "Safari" or after "Version"
+        else if ((verOffset=nAgt.indexOf("Safari"))!=-1) {
+            //browser.webkit = true;
+            browser.safari = true;
+            browser.name = "Safari";
+            browser.fullVersion = nAgt.substring(verOffset+7);
+            if ((verOffset=nAgt.indexOf("Version"))!=-1)
+                browser.fullVersion = nAgt.substring(verOffset+8);
+        }
+        // In Firefox, the true version is after "Firefox"
+        else if ((verOffset=nAgt.indexOf("Firefox"))!=-1) {
+            browser.firefox = true;
+            browser.name = "Firefox";
+            browser.fullVersion = nAgt.substring(verOffset+8);
+        }
+        // In most other browsers, "name/version" is at the end of userAgent
+        else if ( (nameOffset=nAgt.lastIndexOf(' ')+1) <
+            (verOffset=nAgt.lastIndexOf('/')) )
+        {
+            browser.name = nAgt.substring(nameOffset,verOffset);
+            browser.fullVersion = nAgt.substring(verOffset+1);
+            if (browser.name.toLowerCase()==browser.name.toUpperCase()) {
+                browser.name = navigator.appName;
+            }
+        }
+        // trim the fullVersion string at semicolon/space if present
+        if ((ix=browser.fullVersion.indexOf(";"))!=-1)
+            browser.fullVersion=browser.fullVersion.substring(0,ix);
+        if ((ix=browser.fullVersion.indexOf(" "))!=-1)
+            browser.fullVersion=browser.fullVersion.substring(0,ix);
+
+        browser.majorVersion = parseInt(''+browser.fullVersion,10);
+        if (isNaN(browser.majorVersion)) {
+            browser.fullVersion  = ''+parseFloat(navigator.appVersion);
+            browser.majorVersion = parseInt(navigator.appVersion,10);
+        }
+        browser.version = browser.majorVersion;
+
+        return browser;
+    }($);
+
+})(jQuery);(function($)
 {
     Ratchet.Observable = Base.extend(
     {
@@ -2546,8 +3449,6 @@ if (!this.JSON) {
 
             this.id = scope + "-" + id;
 
-            //Ratchet.debug("created: " + this.id);
-
             this.value = null;
             this.subscribers = {};
 
@@ -2557,17 +3458,17 @@ if (!this.JSON) {
 
             // privileged functions
 
-            this.notifySubscribers = function()
+            this.notifySubscribers = function(prior)
             {
                 var _this = this;
 
                 $.each(this.subscribers, function(id, handler) {
                     //Ratchet.debug("Notifying subscriber: " + id + " of update to: " + _this.id);
-                    handler(_this.value);
-                })
+                    handler(_this.value, prior);
+                });
             };
 
-            this.notifyDependents = function()
+            this.notifyDependents = function(prior)
             {
                 $.each(this.dependentOnUs, function(key, observer) {
                     //Ratchet.debug("Notifying dependent:  " + key + " of update to: " + _this.id);
@@ -2606,7 +3507,7 @@ if (!this.JSON) {
 
         isSubscribed: function(id)
         {
-            return this.subscribers[id];
+            return (this.subscribers[id] ? true: false);
         },
 
         markDependentOnUs: function(observable)
@@ -2636,13 +3537,14 @@ if (!this.JSON) {
 
         set: function(value)
         {
+            var prior = this.value;
             this.value = value;
 
             // notify all dependents (observers that depend on our value)
-            this.notifyDependents();
+            this.notifyDependents(prior);
 
             // notify all subscribers of the updated value
-            this.notifySubscribers();
+            this.notifySubscribers(prior);
         },
 
         get: function(_default)
@@ -2657,13 +3559,14 @@ if (!this.JSON) {
 
         clear: function()
         {
+            var prior = this.value;
             delete this.value;
 
             // notify all dependents (observers that depend on our value)
-            this.notifyDependents();
+            this.notifyDependents(prior);
 
             // notify all subscribers of the updated value
-            this.notifySubscribers();
+            this.notifySubscribers(prior);
         }
 
     });
@@ -2804,41 +3707,62 @@ if (!this.JSON) {
         {
             var self = this;
 
+            Ratchet.logDebug("swap() calling into processRegions()");
+
             // process any regions
             self.ratchet().processRegions.call(self.ratchet(), self, function() {
 
                 // process any gadgets
+                Ratchet.logDebug("swap() processRegions complete");
+                Ratchet.logDebug("swap() calling into processGadgets()");
 
                 // dispatcher post-render
                 self.ratchet().processGadgets.call(self.ratchet(), self, function () {
 
+                    Ratchet.logDebug("swap() processGadgets complete");
 
-                    // determine the appropriate merge point
-                    // this is either all of the child nodes that we rendered out or if we rendered a single
-                    // node with lots of children under it, then we'll use that single node
-                    var mergePoint = null;
-                    if (self.children().size() == 0)
+                    var postSwap = function(onComplete)
                     {
-                        // there are no dom node children
-                        // we assume that there is valid text somewhere in there
-                        // use ourselves as a mergepoint so that children get collected in
-                        mergePoint = self; //
-                    }
-                    else
-                    {
-                        // there is at least one dom element in here...
+                        // fire post-swap custom event
+                        $('body').trigger('swap', [self.ratchet()]);
 
-                        // if multiple, then use self as merge point
-                        if (self.children().size() > 1)
-                        {
-                            mergePoint = self;
+                        // increment dispatch completion count
+                        self.ratchet().incrementDispatchCompletionCount();
+
+                        // fire post-dispatch custom event
+                        $('body').trigger('dispatch', [self.ratchet(), self.ratchet().isDispatchCompleted()]);
+
+                        if (onComplete) {
+                            onComplete.call(self);
                         }
-                        else
-                        {
-                            // otherwise, there is either
-                            //   a) stray whitespace text + a dom element
-                            //   b) text we want to keep + dom element
+                    };
 
+
+                    //
+                    // we support three strategies:
+                    //
+                    //   "insert" - the rendered nodes become children of the ratchet el
+                    //   "replace" - the ratchet el is removed and replaced entirely by rendered nodes
+                    //               if there is only one top-child, then it is merged with attributes of the ratchet el
+                    //
+
+                    // assume we are going to insert
+                    var strategy = this.gadgetStrategy;
+                    if (!strategy) {
+                        strategy = "insert";
+                    }
+
+                    if (strategy == "replace")
+                    {
+                        // look through the rendered children to see if we can find a merge point
+                        // a merge point means that there is just one top-most rendered child
+                        // if we find one, then we'll merge attributes from ratchet el to merge point
+
+                        var mergePoint = null;
+
+                        // we must have some DOM children in order for there to be a merge point
+                        if (self.children().size() > 0)
+                        {
                             // get rid of any white space nodes
                             var index = 0;
                             while (index < self[0].childNodes.length)
@@ -2846,7 +3770,8 @@ if (!this.JSON) {
                                 var current = self[0].childNodes[index];
                                 if (current.nodeName == "#text")
                                 {
-                                    if (current.textContent.trim() == 0)
+                                    //if (current.textContent.trim() == 0)
+                                    if (Ratchet.trim(current.textContent).length == 0)
                                     {
                                         self[0].removeChild(current);
                                     }
@@ -2861,79 +3786,158 @@ if (!this.JSON) {
                                 }
                             }
 
-
                             // if the DOM element is now FIRST, then use it as merge point
-                            if (self[0].childNodes[0].nodeName.toLowerCase() == self.children()[0].nodeName)
+                            // AND if there is only one child
+                            if (self[0].childNodes[0].nodeName.toLowerCase() == self.children()[0].nodeName.toLowerCase())
                             {
-                                // just one child node (which is a dom node), so use it as a merge point
-                                mergePoint = self.children()[0];
+                                if (self.children().size() == 1)
+                                {
+                                    // just one child node (which is a dom node), so use it as a merge point
+                                    mergePoint = self.children()[0];
+                                }
+                            }
+                        }
+
+                        // if we have a merge point, then we'll remove the ratchet el and fully recreate
+                        if (mergePoint)
+                        {
+                            // use dom type of the mergepoint
+                            // but if original is BODY, then we preserve
+                            var name = $(mergePoint)[0].nodeName;
+                            if ($(self.ratchet().el)[0].nodeName.toLowerCase() == "body")
+                            {
+                                name = "body";
+                            }
+
+                            // target element
+                            var newEl = $("<" + name + "></" + name + ">");
+
+                            // copy original attributes to target (such as class and id)
+                            var attributes = $(self.ratchet().el)[0].attributes;
+                            $.each(attributes, function() {
+                                if (this.name == "gadget" || this.name == "gadget-strategy")
+                                {
+                                    // skip these
+                                }
+                                else
+                                {
+                                    $(newEl).attr(this.name, this.value);
+                                }
+                            });
+
+                            // copy mergepoint attributes to target
+                            var attributes = $(mergePoint).prop("attributes");
+                            $.each(attributes, function() {
+                                $(newEl).attr(this.name, this.value);
+                            });
+
+                            // copy mergepoint children to target
+                            $(newEl).append($(mergePoint)[0].childNodes);
+
+                            // set a temp key so we can look up after replace
+                            var tempKey = "tempkey-" + new Date().getTime();
+                            $(newEl).attr("tempkey", tempKey);
+
+                            // replace in DOM
+                            var parent = $(self.ratchet().el).parent();
+                            $(self.ratchet().el).replaceWith(newEl);
+                            // now find what we replaced and clean up
+                            newEl = $(parent).find("[tempkey=" + tempKey + "]");
+                            $(newEl).removeAttr("tempkey");
+
+                            // now update the ratchet "el" reference
+                            self.ratchet().el = $(newEl)[0];
+
+                            // all done
+                            postSwap(function() {
+                                if (callback)
+                                {
+                                    callback.call(self);
+                                }
+                            });
+                            return;
+                        }
+
+                        // otherwise, we simply replace the ratchet el with all children
+                        // i.e. no merge
+
+                        // remember the original attributes
+                        var originalAttributes = {};
+                        $.each($(self.ratchet().el)[0].attributes, function() {
+                            if (this.name == "gadget-strategy")
+                            {
+                                // skip these
                             }
                             else
                             {
-                                // what remains is text + dom mixture, so add all children
-                                mergePoint = self;
+                                originalAttributes[this.name] = this.value;
                             }
-
-                        }
-                    }
-
-                    // if the merge point dom type is different from self.ratchet().el...
-                    // then we have to recreate the el
-                    if ($(mergePoint)[0].nodeName != $(self.ratchet().el)[0].nodeName)
-                    {
-                        // assume mergepoint is correct
-                        // but if original is BODY, then we preserve
-                        var name = $(mergePoint)[0].nodeName;
-                        if ($(self.ratchet().el)[0].nodeName.toLowerCase() == "body")
-                        {
-                            name = "body";
-                        }
-
-                        var newEl = $("<" + name + "></" + name + ">");
-
-                        // copy original attributes to target (such as class and id)
-                        var attributes = $(self.ratchet().el).prop("attributes");
-                        $.each(attributes, function() {
-                            $(newEl).attr(this.name, this.value);
                         });
-                        // set a temp key so we can look up after replace
-                        var tk = "key-" + new Date().getTime();
-                        $(newEl).attr("tk", tk);
 
-                        // replace in DOM
-                        $(self.ratchet().el).replaceWith(newEl);
+                        // we'll use these to replace the current el
+                        var replacements = $($(self)[0].childNodes);
 
-                        // now find what we replaced and clean up
-                        newEl = $("[tk=" + tk + "]");
-                        $(newEl).removeAttr("tk");
+                        // swap in replacements
+                        $(self.ratchet().el).replaceWith(replacements);
 
                         // now update the ratchet "el" reference
-                        self.ratchet().el = $(newEl)[0];
+                        self.ratchet().el = null;
+
+                        postSwap(function() {
+
+                            // if swapping in multiple DOM elements, apply ratchet and gadget tags up to the parent
+                            if ($(replacements).children().length > 1) {
+                                $(replacements).parent().attr("gadget", originalAttributes["gadget"]);
+                                $(replacements).parent().attr("ratchet", originalAttributes["ratchet"]);
+                            }
+
+                            // if we really only have one dom element that serves as a replacement
+                            // i.e. getting rid of all text (comments)
+                            if ($(replacements).filter("*").length == 1)
+                            {
+                                // then copy original dom attributes (from gadget tag) back to replacement node
+                                var replacement = $($(replacements).filter("*")[0]);
+                                $.each(originalAttributes, function(name, value) {
+
+                                    if (name == "id")
+                                    {
+                                        // skip these
+                                    }
+                                    else
+                                    {
+                                        if (!$(replacement).attr(name)) {
+                                            $(replacement).attr(name, value);
+                                        }
+                                    }
+                                });
+                            }
+
+
+                            if (callback)
+                            {
+                                callback.call(self);
+                            }
+                        });
+
+                        return;
                     }
+
+
+                    // default behavior (insert)
 
                     // clear the live element
-                    // append the children from the in-memory swap copy
                     $(self.ratchet().el).html("");
-                    $(self.ratchet().el).append($(mergePoint)[0].childNodes);
 
-                    // copy attributes
-                    Ratchet.copyAttributes($(mergePoint), self.ratchet().el);
+                    // append the children from the in-memory swap copy
+                    $(self.ratchet().el).append($(self)[0].childNodes);
 
-                    // fire post-swap custom event
-                    $('body').trigger('swap', [self.ratchet()]);
-
-                    // increment dispatch completion count
-                    self.ratchet().incrementDispatchCompletionCount();
-
-                    // fire post-dispatch custom event
-                    $('body').trigger('dispatch', [self.ratchet(), self.ratchet().isDispatchCompleted()]);
-
-                    // custom callback
-                    if (callback)
-                    {
-                        callback.call(self);
-                    }
-
+                    // all done
+                    postSwap(function() {
+                        if (callback)
+                        {
+                            callback.call(self);
+                        }
+                    });
                 });
             });
         },
@@ -3000,20 +4004,20 @@ if (!this.JSON) {
         },
 
         /**
-         * Transforms using a template and data (model).
+         * Transforms a template at a given URI with the provided model.
          *
-         * @param {String} templateId template id
+         * @param {String} templateIdentifier template (either HTML fragment, URI or a #dom id selector)
          * @param [Object] model data model
          * @param {Function} successCallback
          * @param [Function] failureCallback
          */
-        transform: function(templateId, data, successCallback, failureCallback)
+        transform: function()
         {
             var _this = this;
 
             var args = Ratchet.makeArray(arguments);
 
-            var templateId = args.shift();
+            var templateIdentifier = args.shift();
             var model = this.model;
             var successCallback = null;
             var failureCallback = null;
@@ -3059,118 +4063,33 @@ if (!this.JSON) {
                 }
             }
 
+            // determine whether this is HTML, a template URI or a dom element selector (#)
+            var renderType = "url"; // assume url
+            var renderValue = templateIdentifier;
+            var renderCacheKey = null;
+            if (templateIdentifier.indexOf("#") == 0) {
+                renderType = "selector";
+            }
+            else if (templateIdentifier.indexOf("<") > -1 || templateIdentifier.indexOf(" ") > -1) {
+                renderType = "html";
+            }
+
             // render
-            engine.render(_this, templateId, model, function(el) {
+            engine.render(_this, renderType, renderValue, renderCacheKey, model, function(el) {
 
                 if (successCallback)
                 {
                     successCallback(el);
                 }
 
-            }, function(el, http) {
+            }, function(el, err) {
 
                 if (failureCallback)
                 {
-                    failureCallback(el, http);
+                    failureCallback(el, err);
                 }
 
             });
-        },
-
-        /**
-         * Interceptor method that auto-determines the callback key to use in registering the observable
-         * based on the gadget id.
-         *
-         * @param [String] scope optional scope
-         * @param {String} id the variable id
-         * @param [Function] callbackFunction a callback function to fire when the value of this observable changes
-         */
-        observable: function()
-        {
-            var scope;
-            var id;
-            var callbackFunction;
-
-            var args = Ratchet.makeArray(arguments);
-            if (args.length == 1)
-            {
-                scope = "global";
-                id = args.shift();
-            }
-            else if (args.length == 2)
-            {
-                var a1 = args.shift();
-                var a2 = args.shift();
-
-                if (Ratchet.isFunction(a2))
-                {
-                    scope = "global";
-                    id = a1;
-                    callbackFunction = a2;
-                }
-                else
-                {
-                    scope = a1;
-                    id = a2;
-                }
-            }
-            else if (args.length == 3)
-            {
-                scope = args.shift();
-                id = args.shift();
-                callbackFunction = args.shift();
-            }
-
-            var callbackKey = this.id;
-
-            return this.ratchet().observable(scope, id, callbackKey, callbackFunction);
-        },
-
-        /**
-         * Interceptor method that just does a pass thru
-         */
-        dependentObservable: function()
-        {
-            return this.ratchet().dependentObservable.apply(this.ratchet(), arguments);
-        },
-
-        /**
-         * Subscribes to an observable, attaching a handler.
-         *
-         * @param [String] scope
-         * @param {String} id
-         * @param {Function} handler
-         */
-        subscribe: function()
-        {
-            var args = Ratchet.makeArray(arguments);
-
-            var scope = null;
-            var id = null;
-            var handler = null;
-
-            if (args.length == 2)
-            {
-                scope = "global";
-                id = args.shift();
-                handler = args.shift();
-            }
-            else
-            {
-                scope = args.shift();
-                id = args.shift();
-                handler = args.shift();
-            }
-
-            // wrap function in a closure
-            var func = function(that) {
-                return function() {
-                    handler.call(that);
-                };
-            }(this);
-
-            // register
-            this.ratchet().observable(scope, id, func);
         },
 
         /**
@@ -3183,7 +4102,40 @@ if (!this.JSON) {
         run: function()
         {
             this.ratchet().run.apply(this.ratchet(), arguments);
+        },
+
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // OBSERVABLES
+        //
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+
+        subscribe: function()
+        {
+            return Ratchet.subscribe.apply(this, arguments);
+        },
+
+        unsubscribe: function()
+        {
+            return Ratchet.unsubscribe.apply(this, arguments);
+        },
+
+        observable: function()
+        {
+            return Ratchet.observable.apply(this, arguments)
+        },
+
+        clearObservable: function()
+        {
+            return Ratchet.clearObservable.apply(this, arguments);
+        },
+
+        dependentObservable: function()
+        {
+            return Ratchet.dependentObservable.apply(this, arguments);
         }
+
 
     });
 
@@ -3193,20 +4145,53 @@ if (!this.JSON) {
     {
         // either (type, _ratchet)
         // or (type, _ratchet, id)
-        constructor: function(type, _ratchet, id)
+        constructor: function(type, _ratchet, _gadgetIdentifier)
         {
             this.base();
 
             var _this = this;
 
             this.type = type;
-            this.id = id;
 
-            // if no id, then assume type as id
-            if (!this.id)
+            // the gadget id assumed to be null until configure() is called
+            // at which point Ratchet will have determined that this gadget instance is to take control of
+            // the dispatching
+            this.id = null;
+
+            // helper function to make sure that any dispatch functions first init the gadget state using the gadget
+            // id if it is provided
+            this.wrapConfigurable = function(array)
             {
-                this.id = this.type;
-            }
+                for (var i = 0; i < array.length; i++)
+                {
+                    var a = array[i];
+                    if (Ratchet.isFunction(a))
+                    {
+                        // new dispatch function
+                        // calls configure() before calling function itself
+                        array[i] = function(dispatchHandlerFunction) {
+
+                            return function() {
+
+                                // call configure first to claim the gadget identifier
+                                _this.configure(_gadgetIdentifier);
+
+                                // now call the actual dispatch handler
+                                dispatchHandlerFunction.apply(_this, arguments);
+                            };
+
+                        }(a);
+
+                        break;
+                    }
+                }
+            };
+
+            // keep track of any subscriptions this gadget creates
+            this.subscriptions = {};
+
+            // keep track of any event handlers this gadget registers
+            this.eventHandlers = {};
 
             // privileged methods
 
@@ -3260,15 +4245,66 @@ if (!this.JSON) {
         /**
          * @extension_point
          *
-         * This method should be overridden and used to register routes and observables and the like.
+         * This gets called so that the gadget can bind to any routes that it wants to claim.  The routes should
+         * be claimed by making calls to:
+         *
+         *    this.get()
+         *    this.put()
+         *    this.post()
+         *    this.del()
+         *
+         * For example:
+         *
+         *    this.get("/products", this.products);
+         *
+         * This would tell Ratchet that when the #/products route is encountered, this gadget should handle the
+         * processing for any gadgets of this gadget type.
+         *
+         * Any extensions of this method should make sure to call this.base() to ensure that base setup is
+         * achieved ahead of custom setup.
          */
         setup: function()
         {
         },
 
+        /**
+         * @extension_point
+         *
+         * This gets called when Ratchet has decided to dispatch to a new URI.  Before dispatching, any existing
+         * gadgets are dismantled and destroyed.
+         *
+         * Ratchet will have determined that this gadget is to be destroyed.  This method is responsible for
+         * releasing and cleaning up any data that this gadget instance may be holding on to.
+         */
         teardown: function()
         {
-            // TODO: anything?
+            // release any subscriptions this gadget might have
+            this.unsubscribeAll();
+
+            // release any event handlers this gadget might have
+            this.offAll();
+        },
+
+        /**
+         * @extension_point
+         *
+         * This gets called when Ratchet has decided that this gadget instance is going to be the one responsible
+         * for handling the rendering.  At that point, Ratchet passes in the gadgetId that this instance should
+         * assume.
+         *
+         * The gadget might load or setup configuration or do anything else that it would like ahead of dispatching.
+         * The intention is to support late configuration.  All gadget instance-level configuration should happen
+         * within this method.
+         *
+         * In addition, it should be the case that any configuration applied during the call to configure() should
+         * be destroyed when teardown() gets called.
+         *
+         * @param gadgetIdentifier
+         */
+        configure: function(gadgetIdentifier)
+        {
+            // claim the gadget id
+            this.id = gadgetIdentifier;
         },
 
 
@@ -3278,101 +4314,53 @@ if (!this.JSON) {
         //
         /////////////////////////////////////////////////////////////////////////////////////////////////
 
-
-        /**
-         * Subscribes to an observable, attaching a handler.
-         *
-         * @param [String] scope
-         * @param {String} id
-         * @param {Function} handler
-         */
         subscribe: function()
         {
-            var args = Ratchet.makeArray(arguments);
+            var descriptor = Ratchet.subscribe.apply(this, arguments);
 
-            var scope = null;
-            var id = null;
-            var handler = null;
+            var subscriptionKey = Ratchet.toLinearForm(descriptor);
 
-            if (args.length == 2)
-            {
-                scope = "global";
-                id = args.shift();
-                handler = args.shift();
-            }
-            else
-            {
-                scope = args.shift();
-                id = args.shift();
-                handler = args.shift();
-            }
+            this.subscriptions[subscriptionKey] = descriptor;
 
-            // wrap function in a closure
-            var func = function(that) {
-                return function() {
-                    handler.call(that);
-                };
-            }(this);
-
-            // register
-            this.observable(scope, id, func);
+            return descriptor;
         },
 
-        /**
-         * Interceptor method that auto-determines the callback key to use in registering the observable
-         * based on the gadget id.
-         *
-         * @param [String] scope optional scope
-         * @param {String} id the variable id
-         * @param [Function] callbackFunction a callback function to fire when the value of this observable changes
-         */
+        unsubscribe: function()
+        {
+            var descriptor = Ratchet.unsubscribe.apply(this, arguments);
+
+            var subscriptionKey = Ratchet.toLinearForm(descriptor);
+
+            delete this.subscriptions[subscriptionKey];
+
+            return descriptor;
+        },
+
+        unsubscribeAll: function()
+        {
+            for (var subscriptionKey in this.subscriptions)
+            {
+                var descriptor = this.subscriptions[subscriptionKey];
+
+                Ratchet.unsubscribe(descriptor.scope, descriptor.id, descriptor.listenerId);
+            }
+
+            Ratchet.clearObject(this.subscriptions);
+        },
+
         observable: function()
         {
-            var scope;
-            var id;
-            var callbackFunction;
-
-            var args = Ratchet.makeArray(arguments);
-            if (args.length == 1)
-            {
-                scope = "global";
-                id = args.shift();
-            }
-            else if (args.length == 2)
-            {
-                var a1 = args.shift();
-                var a2 = args.shift();
-
-                if (Ratchet.isFunction(a2))
-                {
-                    scope = "global";
-                    id = a1;
-                    callbackFunction = a2;
-                }
-                else
-                {
-                    scope = a1;
-                    id = a2;
-                }
-            }
-            else if (args.length == 3)
-            {
-                scope = args.shift();
-                id = args.shift();
-                callbackFunction = args.shift();
-            }
-
-            var callbackKey = this.ratchet().id + "-" + this.getGadgetId();
-
-            return this.ratchet().observable(scope, id, callbackKey, callbackFunction);
+            return Ratchet.observable.apply(this, arguments)
         },
 
-        /**
-         * Interceptor method that just does a pass thru
-         */
+        clearObservable: function()
+        {
+            return Ratchet.clearObservable.apply(this, arguments);
+        },
+
         dependentObservable: function()
         {
-            return this.ratchet().dependentObservable.apply(this.ratchet(), arguments);
+            return Ratchet.dependentObservable.apply(this, arguments);
         },
 
 
@@ -3386,8 +4374,7 @@ if (!this.JSON) {
 
 
         /**
-         * Produces a refresh handler that reloads this gadget with the last
-         * dispatched method, uri and data.
+         * Produces an observable change handler that reloads this gadget with the last dispatched context.
          *
          * @param gadget
          * @param route
@@ -3396,44 +4383,8 @@ if (!this.JSON) {
         {
             return function(el)
             {
-                return function()
+                return function(newValue, oldValue)
                 {
-                    /**
-                     * PROBLEM: the issue is that gadgets are bound to ratchets when they instantiate
-                     * They hold this reference to the ratchet and the reference is further passed into the
-                     * RenderContext object.
-                     *
-                     * Thus, when you do something like shown below, this dispatches against the original ratchet().
-                     *
-                     * However, if someone runs a route() such as when a page runs route "/security" from "/", this
-                     * causes the top most ratchet to reload all of its child ratchets and do its whole
-                     * process subgadgets thing.
-                     *
-                     * When it does this, it first tears down any existing ratchets and destroys and gadget instances.
-                     * And then it rebuilds everything by walking the [gadget] tags and reinstantiating any gadgets.
-                     *
-                     * The original reference (hit from below) is bound to the wrong div element.
-                     *
-                     * Should there be any notion of gadgets not being destroyed until they go off-page?
-                     *
-                     * --
-                     *
-                     * the toolbar is originally ratchet-6
-                     *
-                     * by the time we click through a few pages, the toolbar ratchet has been updated to toolbar-24 or something
-                     * however, the el used by the observer is still bound to ratchet-6!
-                     *
-                     * if things are working correctly, the subscriber should be shut down and re-created against the new
-                     * ratchet each time.
-                     *
-                     * q: is this happening and if so, is it somehow using the old ratchet?  why?
-                     *
-                     * problem: the old ratchet has an old DOM element that isn't applicable anymore!
-                     * so things get written into nowhere/nothingness
-                     *
-                     *
-                     *
-                     */
                     el.run(el.route.method, el.route.uri, el.route.data);
                 };
 
@@ -3450,6 +4401,8 @@ if (!this.JSON) {
         /////////////////////////////////////////////////////////////////////////////////////////////////
 
         /**
+         * Tells Ratchet to dispatch to another URI.
+         *
          * @param [String] method assumes GET
          * @param {String} uri
          * @param [Object] data
@@ -3478,6 +4431,7 @@ if (!this.JSON) {
         {
             var array = Ratchet.makeArray(arguments);
             array.push(this);
+            this.wrapConfigurable(array);
 
             this.ratchet().get.apply(this.ratchet(), array);
         },
@@ -3486,6 +4440,7 @@ if (!this.JSON) {
         {
             var array = Ratchet.makeArray(arguments);
             array.push(this);
+            this.wrapConfigurable(array);
 
             this.ratchet().post.apply(this.ratchet(), array);
         },
@@ -3494,6 +4449,7 @@ if (!this.JSON) {
         {
             var array = Ratchet.makeArray(arguments);
             array.push(this);
+            this.wrapConfigurable(array);
 
             this.ratchet().put.apply(this.ratchet(), array);
         },
@@ -3502,6 +4458,7 @@ if (!this.JSON) {
         {
             var array = Ratchet.makeArray(arguments);
             array.push(this);
+            this.wrapConfigurable(array);
 
             this.ratchet().del.apply(this.ratchet(), array);
         },
@@ -3517,58 +4474,139 @@ if (!this.JSON) {
         select: function(selector)
         {
             return this.ratchet().select(selector);
+        },
+
+
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // EVENTS
+        //
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+
+        /**
+         * Binds a single event handler.
+         *
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param {Function} eventHandler
+         */
+        on: function()
+        {
+            var descriptor = Ratchet.Events.on.apply(this, arguments);
+
+            var eventKey = Ratchet.toLinearForm(descriptor);
+            this.eventHandlers[eventKey] = descriptor;
+
+            return descriptor;
+        },
+
+        /**
+         * Binds a single event to be triggered only once.  After triggering, the handler is removed.
+         *
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param {Function} eventHandler
+         */
+        once: function()
+        {
+            return Ratchet.Events.once.apply(this, arguments);
+        },
+
+        /**
+         * Removes an event handler.
+         *
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param {Function} eventHandler
+         */
+        off: function()
+        {
+            var descriptor = Ratchet.Events.off.apply(this, arguments);
+
+            var eventKey = Ratchet.toLinearForm(descriptor);
+
+            delete this.eventHandlers[eventKey];
+
+            return descriptor;
+        },
+
+        /**
+         * Clears all registered events for this gadget.
+         */
+        offAll: function()
+        {
+            for (var eventKey in this.eventHandlers)
+            {
+                var descriptor = this.eventHandlers[eventKey];
+
+                Ratchet.Events.off(descriptor.scope, descriptor.id, descriptor.handlerId);
+            }
+
+            Ratchet.clearObject(this.eventHandlers);
+        },
+
+        /**
+         * Triggers an event.
+         *
+         * @param [String] scope an optional behavior scope
+         * @param {String} eventId
+         * @param [Object] eventParameters
+         */
+        trigger: function()
+        {
+            return Ratchet.Events.trigger.apply(this, arguments);
         }
 
     });
 
-})(jQuery);(function($)
+})(jQuery);(function()
 {
-    Ratchet.GadgetRegistry = {};
-    Ratchet.GadgetRegistry.registry = {};
+    var gadgetRegistry = {};
 
-    /**
-     * Classifies a gadget implementation class as being of a particular type (i.e. "sidebar").
-     *
-     * @param type
-     * @param classObject
-     */
-    Ratchet.GadgetRegistry.register = function(type, classObject)
-    {
-        if(!Ratchet.GadgetRegistry.registry[type])
+    Ratchet.GadgetRegistry = {
+
+        register: function(type, classObject)
         {
-            Ratchet.GadgetRegistry.registry[type] = [];
+            if (!gadgetRegistry[type]) {
+                gadgetRegistry[type] = [];
+            }
+
+            gadgetRegistry[type].push(classObject);
+
+            return classObject;
+        },
+
+        list: function(type)
+        {
+            return gadgetRegistry[type];
+        },
+
+        instantiate: function(type, ratchet, id)
+        {
+            var instances = [];
+
+            var classObjects = gadgetRegistry[type];
+            if (classObjects)
+            {
+                for (var i = 0; i < classObjects.length; i++)
+                {
+                    var classObject = classObjects[i];
+
+                    var instance = new classObject(type, ratchet, id);
+                    instances.push(instance);
+
+                }
+            }
+
+            // we reverse the list so that defaults appear at the end
+            // that way, we can override by URI
+            return instances.reverse();
         }
 
-        Ratchet.GadgetRegistry.registry[type].push(classObject);
     };
 
-    /**
-     * Instantiates any gadgets for the given gadget type.
-     *
-     * @param type
-     * @param id
-     * @param ratchet
-     */
-    Ratchet.GadgetRegistry.instantiate = function(type, id, ratchet)
-    {
-        var instances = [];
-
-        var classObjects = Ratchet.GadgetRegistry.registry[type];
-        if (classObjects)
-        {
-            $.each(classObjects, function(index, classObject) {
-
-                var instance = new classObject(type, ratchet, id);
-                instances.push(instance);
-            });
-        }
-
-        // we reverse the list so that defaults appear at the end
-        // that way, we can override by URI
-        return instances.reverse();
-    };
-
-})(jQuery);
+})();
 (function()
 {
     Ratchet.TemplateEngineRegistry = {};
@@ -3613,6 +4651,11 @@ if (!this.JSON) {
 })();
 (function($)
 {
+    // template cache
+    if (typeof(Ratchet.TemplateCache) == "undefined") {
+        Ratchet.TemplateCache = {};
+    }
+
     Ratchet.BaseTemplateEngine = Base.extend(
     {
         constructor: function(id)
@@ -3623,6 +4666,9 @@ if (!this.JSON) {
 
             this.cleanMarkup = function(el, html)
             {
+                // replace img "src" attributes with "no_load_src" attribute
+                html = html.replace(/<img [^>]*src=['"]([^'"]+)[^>]*>/gi, function (match, capture) {return "<img no_load_src=\"" +capture+ "\" />";});
+
                 // convert to a dom briefly
                 var dom = $(html);
 
@@ -3635,30 +4681,108 @@ if (!this.JSON) {
                     }
                 }
 
+                // replace img "no_load_src" attributes with "src" attribute
+                html = html.replace(/<img [^>]*no_load_src=['"]([^'"]+)[^>]*>/gi, function (match, capture) {return "<img src=\"" +capture+ "\" />";});
+
                 return html;
             }
+        },
+
+        renderUri: function(el, uri, model, successCallback, failureCallback)
+        {
+            return this.render(el, "uri", uri, uri, model, successCallback, failureCallback);
         },
 
         /**
          * Renders a template.
          *
-         * @param templateId
+         * @param el
+         * @param type either "url", "selector", "html"
+         * @param value either the URL, selector string or HTML body
+         * @param cacheKey
+         * @param model
+         * @param successCallback
+         * @param failureCallback
          */
-        render: function(el, templateId, model, successCallback, failureCallback)
+        render: function(el, type, value, cacheKey, model, successCallback, failureCallback)
         {
-            this.doRender(el, templateId, model, successCallback, failureCallback);
+            var self = this;
+
+            var renderCallback = function(err, html)
+            {
+                if (err) {
+                    failureCallback.call(failureCallback, el, err);
+                    return;
+                }
+
+                $(el).html("");
+                $(el).append(html);
+
+                if (successCallback)
+                {
+                    successCallback.call(successCallback, el)
+                }
+            };
+
+            // if they're using a selector, we can pick out the html right here and pass forward
+            if (type == "selector" || type == "html")
+            {
+                var html = value;
+                if (type == "selector") {
+                    html = $(el).select(value).html();
+                }
+
+                this.doRender(el, cacheKey, html, model, renderCallback);
+            }
+            else if (type == "url" || type == "uri")
+            {
+                var fileExtension = self.fileExtension();
+
+                var url = value;
+                if (url.indexOf("." + fileExtension) == -1) {
+                    url += "." + fileExtension;
+                }
+
+                $.ajax({
+                    "url": url,
+                    "dataType": "html",
+                    "success": function(html)
+                    {
+                        // cleanup html
+                        html = self.cleanMarkup(el, html);
+
+                        self.doRender(el, cacheKey, html, model, renderCallback);
+                    },
+                    "failure": function(http)
+                    {
+                        if (failureCallback)
+                        {
+                            failureCallback.call(failureCallback, el, http);
+                        }
+                    }
+                });
+            }
+            else
+            {
+                failureCallback.call(failureCallback, new Error("Unknown render type: " + type));
+            }
+
+        },
+
+        fileExtension: function() {
+            return "html";
         },
 
         /**
          * EXTENSION POINT
          *
          * @param el
-         * @param templateId
+         * @param name (used for caching)
+         * @param html
          * @param model
-         * @param successCallback
-         * @param failureCallback
+         * @param callback
          */
-        doRender: function(el, templateId, model, successCallback, failureCallback)
+        doRender: function(el, name, html, model, callback)
         {
 
         }
@@ -3704,6 +4828,310 @@ if (!this.JSON) {
 
 })(jQuery);(function($)
 {
+    var map = {};
+
+    // event class
+    var RatchetEvent = Base.extend({
+
+        constructor: function(scope, id)
+        {
+            this.base();
+
+            this.id = scope + "-" + id;
+            this.subscribers = {};
+        },
+
+        /**
+         * Registers a handler which acts as a subscriber.
+         *
+         * @param id
+         * @param handler
+         */
+        subscribe: function(id, handler)
+        {
+            if (!this.isSubscribed(id))
+            {
+                this.subscribers[id] = handler;
+            }
+        },
+
+        unsubscribe: function(id)
+        {
+            delete this.subscribers[id];
+        },
+
+        isSubscribed: function(id)
+        {
+            return (this.subscribers[id] ? true: false);
+        },
+
+        /**
+         * Triggers the event with optional parameters.
+         *
+         * @param parameters
+         */
+        trigger: function(parameters)
+        {
+            $.each(this.subscribers, function(id, handler) {
+                handler(parameters);
+            });
+        }
+
+    });
+
+    // grouping of events by scope
+    var ScopedRatchetEvents = Base.extend({
+
+        constructor: function(scope)
+        {
+            this.base();
+
+            this.scope = scope;
+            this.events = {};
+        },
+
+        event: function(id)
+        {
+            if (!this.events[id])
+            {
+                this.events[id] = new RatchetEvent(this.scope, id);
+            }
+
+            // hand back from map
+            return this.events[id];
+        },
+
+        events: function()
+        {
+            return this.events;
+        }
+
+    });
+
+    var getEvent = function(scope, id)
+    {
+        if (!map[scope]) {
+            map[scope] = new ScopedRatchetEvents(scope);
+        }
+
+        return map[scope].event(id);
+    };
+
+
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // EVENT HELPER FUNCTIONS
+    //
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+
+    Ratchet.Events = {};
+
+    /**
+     * Binds a single event handler for this ratchet.
+     *
+     * @param [String] scope an optional behavior scope
+     * @param {String} eventId
+     * @param {Function} eventHandler
+     */
+    Ratchet.Events.on = function()
+    {
+        var args = Ratchet.makeArray(arguments);
+
+        var scope = null;
+        var id = null;
+        var handler = null;
+
+        if (args.length == 2)
+        {
+            scope = "global";
+            id = args.shift();
+            handler = args.shift();
+        }
+        else
+        {
+            scope = args.shift();
+            id = args.shift();
+            handler = args.shift();
+        }
+
+        if (!id)
+        {
+            Ratchet.logError("Missing event id");
+            return null;
+        }
+
+        // function identifier
+        var handlerId = handler._hfid;
+        if (!handlerId) {
+            handlerId = Ratchet.generateEventHandlerId();
+            handler._hfid = handlerId;
+        }
+
+        // wrap function into a closure
+        var func = function(that) {
+            return function() {
+                return handler.apply(that, arguments);
+            };
+        }(this);
+        func._hfid = handler._hfid;
+
+        // retrieve the event
+        var event = getEvent(scope, id);
+
+        // tell the event to subscribe a handler
+        event.subscribe(handlerId, func);
+
+        return {
+            "scope": scope,
+            "id": id,
+            "handlerId": handlerId
+        };
+    };
+
+    /**
+     * Binds a single event to be triggered only once.  After triggering, the handler is removed.
+     *
+     * @param [String] scope an optional behavior scope
+     * @param {String} eventId
+     * @param {Function} eventHandler
+     */
+    Ratchet.Events.once = function()
+    {
+        var self = this;
+
+        var args = Ratchet.makeArray(arguments);
+
+        var scope = null;
+        var id = null;
+        var handler = null;
+
+        if (args.length == 2)
+        {
+            scope = "global";
+            id = args.shift();
+            handler = args.shift();
+        }
+        else
+        {
+            scope = args.shift();
+            id = args.shift();
+            handler = args.shift();
+        }
+
+        var _eventHandler = function(scope, id, handler)
+        {
+            return function(eventParameters)
+            {
+                var ret = handler(eventParameters);
+
+                self.off(scope, id, this);
+
+                return ret;
+            };
+
+        }(scope, id, handler);
+
+        return this.on(scope, id, _eventHandler);
+    };
+
+    /**
+     * Removes an event handler.
+     *
+     * @param [String] scope an optional behavior scope
+     * @param {String} eventId
+     * @param {Function|String} eventHandler (or handler id)
+     */
+    Ratchet.Events.off = function()
+    {
+        var args = Ratchet.makeArray(arguments);
+
+        var scope = null;
+        var id = null;
+        var handlerOrId = null;
+
+        if (args.length == 2)
+        {
+            scope = "global";
+            id = args.shift();
+            handlerOrId = args.shift();
+        }
+        else if (args.length == 3)
+        {
+            scope = args.shift();
+            id = args.shift();
+            handlerOrId = args.shift();
+        }
+
+        var handlerId = handlerOrId;
+        if (Ratchet.isFunction(handlerId))
+        {
+            handlerId = handlerId._hfid;
+        }
+
+        // retrieve the event
+        var event = getEvent(scope, id);
+
+        // unsubscribe the handler
+        event.unsubscribe(handlerId);
+
+        return {
+            "scope": scope,
+            "id": id,
+            "handlerId": handlerId
+        };
+
+    };
+
+    /**
+     * Triggers an event.
+     *
+     * @param [String] scope an optional behavior scope
+     * @param {String} eventId
+     * @param [Object] eventParameters
+     */
+    Ratchet.Events.trigger = function()
+    {
+        var args = Ratchet.makeArray(arguments);
+
+        var scope = null;
+        var id = null;
+        var eventParameters = null;
+
+        if (args.length == 1)
+        {
+            scope = "global";
+            id = args.shift();
+            eventParameters = {};
+        }
+        else if (args.length == 2)
+        {
+            scope = "global";
+            id = args.shift();
+            eventParameters = args.shift();
+        }
+        else if (args.length == 3)
+        {
+            scope = args.shift();
+            id = args.shift();
+            eventParameters = args.shift();
+        }
+
+        // retrieve the event
+        var event = getEvent(scope, id);
+
+        // trigger
+        return event.trigger(eventParameters);
+    };
+
+
+
+
+
+
+
+})(jQuery);(function($)
+{
     $.ratchet = Ratchet;
 
     $.fn.ratchet = function(func) {
@@ -3718,41 +5146,6 @@ if (!this.JSON) {
     $.fn.serializeObject = function() {
         return window.form2object(this[0]);
     };
-
-    /**
-     * Finds the closest child that matches the given selector using a breadth first lookup.
-     *
-     * @param selector
-     */
-    /*
-    $.fn.closestChild = function(selector) {
-
-		// breadth first search for the first matched node
-		if (selector && selector != '')
-        {
-			var queue = [];
-			queue.push(this);
-			while(queue.length > 0)
-            {
-				var node = queue.shift();
-				var children = node.children();
-				for(var i = 0; i < children.length; ++i)
-                {
-					var child = $(children[i]);
-					if (child.is(selector))
-                    {
-						return child;
-					}
-
-                    queue.push(child);
-				}
-			}
-		}
-
-        // nothing was found
-		return $();
-	};
-	*/
 
     /**
      * Uses a recursive, breadth first approach to walk the descendants of the current DOM element and
@@ -3793,8 +5186,15 @@ if (!this.JSON) {
         drill(this);
 
         return $(descendants);
-    }
+    };
 
+    $.event.special.destroyed = {
+        remove: function(o) {
+            if (o.handler) {
+                o.handler();
+            }
+        }
+    };
 
 })(jQuery);(function($)
 {
